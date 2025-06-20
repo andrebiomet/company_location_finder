@@ -1,27 +1,68 @@
 import streamlit as st
-import streamlit as st
-from pathlib import Path
-from PIL import Image 
+import requests
+import folium
+from streamlit_folium import st_folium
+from folium.plugins import MarkerCluster
 
-st.set_page_config(page_title="My Multi‑Dashboards", layout="centered")
-st.title("Welcome to the Biomet.life Demo")
-st.write(
-    """
-    Use the sidebar (►) to navigate between:
+# --- Helper functions ---
+def query_overpass(company_name):
+    query = f """
+    [out:json][timeout:25];
+    (
+      node["name"~"{company_name}", i];
+      way["name"~"{company_name}", i];
+      relation["name"~"{company_name}", i];
+    );
+    out center;"""
+    
+    url = "https://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={"data": query})
+    response.raise_for_status()
+    return response.json()
 
-    1. Paris Risk Viewer  
-    2. Stanlow Biodiversity & Environmental Risk Viewer  
-    3. Fire Readiness Scenario Viewer
-    """
-)
-# Add chatbot call-to-action
-st.write(
-    "💬 For a **tailored analysis**, check out our chatbot: "
-    "[Biomet Chatbot](https://biomet-webapp.azurewebsites.net/)"
-)
+def parse_osm_results(data):
+    elements = data.get("elements", [])
+    sites = []
+    for el in elements:
+        tags = el.get("tags", {})
+        site = {
+            "name": tags.get("name", "Unnamed"),
+            "lat": el.get("lat") or el.get("center", {}).get("lat"),
+            "lon": el.get("lon") or el.get("center", {}).get("lon"),
+            "type": tags.get("building") or tags.get("office") or tags.get("amenity") or tags.get("industrial") or "unspecified"
+        }
+        if site["lat"] and site["lon"]:
+            sites.append(site)
+    return sites
 
-# load & display your logo
-BASE_DIR = Path(__file__).parent
-logo_path = BASE_DIR / "Biomet Logo.png"
-logo = Image.open(logo_path)
-st.image(logo, width=700)  # adjust width as needed
+# --- Streamlit UI ---
+st.set_page_config(page_title="Company OSM Sites Map", layout="wide")
+st.title("🌍 Company Site Finder (via OpenStreetMap)")
+
+company = st.text_input("Enter company name:", "Coca-Cola")
+
+if company:
+    with st.spinner(f"Searching OSM for '{company}' sites..."):
+        try:
+            osm_data = query_overpass(company)
+            locations = parse_osm_results(osm_data)
+
+            if not locations:
+                st.warning("No sites found on OSM for that company.")
+            else:
+                m = folium.Map(location=[locations[0]['lat'], locations[0]['lon']], zoom_start=4)
+                marker_cluster = MarkerCluster().add_to(m)
+
+                for site in locations:
+                    folium.Marker(
+                        location=[site['lat'], site['lon']],
+                        popup=f"{site['name']}<br>Type: {site['type']}",
+                        tooltip=f"{site['name']} ({site['type']})"
+                    ).add_to(marker_cluster)
+
+                st.subheader("📍 Sites Map")
+                st_folium(m, width=1000, height=600)
+
+        except Exception as e:
+            st.error(f"Error querying OSM: {e}")
+
