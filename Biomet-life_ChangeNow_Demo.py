@@ -12,9 +12,15 @@ def query_overpass(company_name):
       node["name"~"{company_name}", i];
       way["name"~"{company_name}", i];
       relation["name"~"{company_name}", i];
+      node["operator"~"{company_name}", i];
+      way["operator"~"{company_name}", i];
+      relation["operator"~"{company_name}", i];
+      node["brand"~"{company_name}", i];
+      way["brand"~"{company_name}", i];
+      relation["brand"~"{company_name}", i];
     );
-    out center;"""
-    
+    out center;
+    """
     url = "https://overpass-api.de/api/interpreter"
     response = requests.post(url, data={"data": query})
     response.raise_for_status()
