@@ -6,7 +6,7 @@ from folium.plugins import MarkerCluster
 
 # --- Helper functions ---
 def query_overpass(company_name):
-    query = f """
+    query = """
     [out:json][timeout:25];
     (
       node["name"~"{company_name}", i];
