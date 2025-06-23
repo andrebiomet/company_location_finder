@@ -1,74 +1,75 @@
 import streamlit as st
 import requests
 import folium
+import time
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
-# --- Helper functions ---
-def query_overpass(company_name):
-    query = f"""
-    [out:json][timeout:25];
-    (
-      node["name"~"{company_name}", i];
-      way["name"~"{company_name}", i];
-      relation["name"~"{company_name}", i];
-      node["operator"~"{company_name}", i];
-      way["operator"~"{company_name}", i];
-      relation["operator"~"{company_name}", i];
-      node["brand"~"{company_name}", i];
-      way["brand"~"{company_name}", i];
-      relation["brand"~"{company_name}", i];
-    );
-    out center;
-    """
-    url = "https://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={"data": query})
-    response.raise_for_status()
-    return response.json()
+API_KEY = "YOUR_API_KEY"  # Replace with your actual Google Maps API key
 
-def parse_osm_results(data):
-    elements = data.get("elements", [])
-    sites = []
-    for el in elements:
-        tags = el.get("tags", {})
-        site = {
-            "name": tags.get("name", "Unnamed"),
-            "lat": el.get("lat") or el.get("center", {}).get("lat"),
-            "lon": el.get("lon") or el.get("center", {}).get("lon"),
-            "type": tags.get("building") or tags.get("office") or tags.get("amenity") or tags.get("industrial") or "unspecified"
-        }
-        if site["lat"] and site["lon"]:
-            sites.append(site)
-    return sites
+# --- Helper function ---
+def search_company_sites(company_name, location=""):
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    params = {
+        'query': f"{company_name} {location}",
+        'key': API_KEY
+    }
+
+    results = []
+    while url:
+        res = requests.get(url, params=params)
+        data = res.json()
+
+        for place in data.get("results", []):
+            site = {
+                "name": place.get("name"),
+                "address": place.get("formatted_address"),
+                "lat": place.get("geometry", {}).get("location", {}).get("lat"),
+                "lon": place.get("geometry", {}).get("location", {}).get("lon"),
+                "types": place.get("types"),
+                "status": place.get("business_status", "N/A")
+            }
+            if site["lat"] and site["lon"]:
+                results.append(site)
+
+        next_page_token = data.get("next_page_token")
+        if next_page_token:
+            time.sleep(2)
+            params = {'pagetoken': next_page_token, 'key': API_KEY}
+        else:
+            break
+
+    return results
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Company OSM Sites Map", layout="wide")
-st.title("🌍 Company Site Finder (via OpenStreetMap)")
+st.set_page_config(page_title="Company Sites via Google Maps", layout="wide")
+st.title("🌍 Company Site Finder (via Google Maps API)")
 
 company = st.text_input("Enter company name:", "Coca-Cola")
+location_filter = st.text_input("Optional location (e.g., Greece):", "")
 
 if company:
-    with st.spinner(f"Searching OSM for '{company}' sites..."):
+    with st.spinner(f"Searching Google Maps for '{company}' sites..."):
         try:
-            osm_data = query_overpass(company)
-            locations = parse_osm_results(osm_data)
+            locations = search_company_sites(company, location=location_filter)
 
             if not locations:
-                st.warning("No sites found on OSM for that company.")
+                st.warning("No sites found on Google Maps for that company.")
             else:
-                m = folium.Map(location=[locations[0]['lat'], locations[0]['lon']], zoom_start=4)
+                m = folium.Map(location=[locations[0]['lat'], locations[0]['lon']], zoom_start=5)
                 marker_cluster = MarkerCluster().add_to(m)
 
                 for site in locations:
                     folium.Marker(
                         location=[site['lat'], site['lon']],
-                        popup=f"{site['name']}<br>Type: {site['type']}",
-                        tooltip=f"{site['name']} ({site['type']})"
+                        popup=f"<b>{site['name']}</b><br>{site['address']}<br>Status: {site['status']}",
+                        tooltip=site['name']
                     ).add_to(marker_cluster)
 
                 st.subheader("📍 Sites Map")
                 st_folium(m, width=1000, height=600)
 
         except Exception as e:
-            st.error(f"Error querying OSM: {e}")
+            st.error(f"Error querying Google Maps API: {e}")
+
 
