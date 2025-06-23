@@ -48,28 +48,31 @@ st.title("🌍 Company Site Finder (via Google Maps API)")
 company = st.text_input("Enter company name:", "Coca-Cola")
 location_filter = st.text_input("Optional location (e.g., Greece):", "")
 
-if company:
-    with st.spinner(f"Searching Google Maps for '{company}' sites..."):
-        try:
-            locations = search_company_sites(company, location=location_filter)
+if st.button("🔍 Search"):
+    if company:
+        with st.spinner(f"Searching Google Maps for '{company}' sites..."):
+            try:
+                locations = search_company_sites(company, location=location_filter)
 
-            if not locations:
-                st.warning("No sites found on Google Maps for that company.")
-            else:
-                m = folium.Map(location=[locations[0]['lat'], locations[0]['lon']], zoom_start=5)
-                marker_cluster = MarkerCluster().add_to(m)
+                if not locations:
+                    st.warning("No sites found on Google Maps for that company.")
+                else:
+                    m = folium.Map(location=[locations[0]['lat'], locations[0]['lon']], zoom_start=5)
+                    marker_cluster = MarkerCluster().add_to(m)
 
-                for site in locations:
-                    folium.Marker(
-                        location=[site['lat'], site['lon']],
-                        popup=f"<b>{site['name']}</b><br>{site['address']}<br>Status: {site['status']}",
-                        tooltip=site['name']
-                    ).add_to(marker_cluster)
+                    for site in locations:
+                        folium.Marker(
+                            location=[site['lat'], site['lon']],
+                            popup=f"<b>{site['name']}</b><br>{site['address']}<br>Status: {site['status']}",
+                            tooltip=site['name']
+                        ).add_to(marker_cluster)
 
-                st.subheader("📍 Sites Map")
-                st_folium(m, width=1000, height=600)
+                    st.subheader("📍 Sites Map")
+                    st_folium(m, width=1000, height=600)
 
-        except Exception as e:
-            st.error(f"Error querying Google Maps API: {e}")
+            except Exception as e:
+                st.error(f"Error querying Google Maps API: {e}")
+    else:
+        st.warning("Please enter a company name.")
 
 
