@@ -12,7 +12,7 @@ def search_company_sites(company_name, location="Greece"):
     """Search for company locations using Google Places API."""
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     params = {
-        'query': company_name + " in " + location,
+        query = company_name if location.strip() == "" else f"{company_name} in {location}",
         'key': API_KEY
     }
 
@@ -74,8 +74,16 @@ if "sites" in st.session_state:
         st.success(f"✅ Found {len(sites)} site(s).")
 
         # Center map on first result
-        first_location = sites[0]['location']
-        m = folium.Map(location=[first_location['lat'], first_location['lng']], zoom_start=6)
+        if sites:
+            first = sites[0]
+            if first["location"] and "lat" in first["location"] and "lng" in first["location"]:
+                start_coords = [first["location"]["lat"], first["location"]["lng"]]
+            else:
+                start_coords = [48.8566, 2.3522]  # fallback to Paris
+        else:
+            start_coords = [48.8566, 2.3522]  # fallback if no sites
+            
+        m = folium.Map(location=start_coords, zoom_start=4)
         marker_cluster = MarkerCluster().add_to(m)
 
         for site in sites:
