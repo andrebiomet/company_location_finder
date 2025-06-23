@@ -36,7 +36,7 @@ def search_company_sites(company_name, location=""):
                 "types": place.get("types"),
                 "status": place.get("business_status", "N/A")
             }
-            if site["lat"] and site["lon"]:
+            if site["lat"] is not None and site["lon"] is not None:
                 results.append(site)
 
         next_page_token = data.get("next_page_token")
