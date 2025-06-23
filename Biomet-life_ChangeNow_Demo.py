@@ -6,7 +6,7 @@ from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
 # --- CONFIG ---
-API_KEY = "YOUR_API_KEY"  # Replace with your actual Google Maps API key
+API_KEY = "AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No" 
 
 # --- Function to search company sites using Google Maps API ---
 def search_company_sites(company_name, location=""):
