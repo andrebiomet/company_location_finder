@@ -82,9 +82,11 @@ if "sites" in st.session_state:
             loc = site["location"]
             folium.Marker(
                 location=[loc['lat'], loc['lng']],
-                popup=f"<b>{site['name']}</b><br>{site['address']}<br>Status: {site['business_status']}",
-                tooltip=site['name']
+                popup=folium.Popup(f"{site['name']}\n{site['address']}", max_width=250),
+                tooltip=site['name'],
+                icon=folium.Icon(icon="info-sign")  # ✅ Adds default pin
             ).add_to(marker_cluster)
+
 
         st.subheader("📍 Sites Map")
         st_folium(m, width=1000, height=600)
