@@ -5,36 +5,40 @@ import time
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
-API_KEY = "AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No"  # Replace with your key
+API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'  # Replace with your actual Google Maps API key
 
-def search_company_sites(company_name, location=""):
-    """Search company locations using Google Places API."""
-    query = company_name if location.strip() == "" else f"{company_name} in {location}"
-    base_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    params = {'query': query, 'key': API_KEY}
+def search_company_sites(company_name, location="Greece"):
+    """Search for company locations using Google Places API."""
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    params = {
+        'query': company_name + " in " + location,
+        'key': API_KEY
+    }
 
     results = []
-
-    while True:
-        res = requests.get(base_url, params=params)
+    while url:
+        res = requests.get(url, params=params)
         data = res.json()
+        st.write("📦 API Response:", data)  # Optional debug
 
         for place in data.get("results", []):
-            loc = place.get("geometry", {}).get("location")
-            if loc:
-                site = {
-                    "name": place.get("name"),
-                    "address": place.get("formatted_address"),
-                    "location": loc,
-                    "types": place.get("types"),
-                    "business_status": place.get("business_status")
-                }
-                results.append(site)
+            site = {
+                "name": place.get("name"),
+                "address": place.get("formatted_address"),
+                "location": place.get("geometry", {}).get("location"),
+                "types": place.get("types"),
+                "business_status": place.get("business_status")
+            }
+            results.append(site)
 
         next_page_token = data.get("next_page_token")
         if next_page_token:
-            time.sleep(2)  # wait for token to become active
-            params = {'pagetoken': next_page_token, 'key': API_KEY}
+            time.sleep(2)  # Required delay before using the token
+            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {
+                'pagetoken': next_page_token,
+                'key': API_KEY
+            }
         else:
             break
 
@@ -44,8 +48,8 @@ def search_company_sites(company_name, location=""):
 st.set_page_config(page_title="Company Site Finder", layout="wide")
 st.title("🌍 Company Site Finder (via Google Maps API)")
 
-company = st.text_input("Enter company name:", "Coca-Cola")
-location = st.text_input("Optional location (e.g., Greece):", "")
+company = st.text_input("Enter company name:", "Coca Cola")
+location = st.text_input("Location (e.g., Greece):", "Greece")
 
 if st.button("🔍 Search"):
     if company.strip():
@@ -59,34 +63,26 @@ if st.button("🔍 Search"):
     else:
         st.warning("Please enter a company name.")
 
-# --- Map ---
+# --- Display map ---
 if "sites" in st.session_state:
     sites = st.session_state["sites"]
 
     if not sites:
         st.warning("No sites found.")
     else:
-        first_valid = next((s for s in sites if s["location"]), None)
-        if first_valid:
-            start_coords = [first_valid["location"]["lat"], first_valid["location"]["lng"]]
-        else:
-            start_coords = [48.8566, 2.3522]  # fallback: Paris
-
-        m = folium.Map(location=start_coords, zoom_start=5)
-        marker_cluster = MarkerCluster().add_to(m)
+        center = next((s["location"] for s in sites if s["location"]), {"lat": 48.8566, "lng": 2.3522})
+        m = folium.Map(location=[center["lat"], center["lng"]], zoom_start=5)
+        cluster = MarkerCluster().add_to(m)
 
         for site in sites:
             loc = site["location"]
             folium.Marker(
                 location=[loc["lat"], loc["lng"]],
-                popup=folium.Popup(
-                    f"<b>{site['name']}</b><br>{site['address']}<br>Status: {site['business_status']}", max_width=300
-                ),
-                tooltip=site["name"],
-                icon=folium.Icon(icon="info-sign")
-            ).add_to(marker_cluster)
+                popup=f"{site['name']}<br>{site['address']}<br>Status: {site['business_status']}",
+                tooltip=site["name"]
+            ).add_to(cluster)
 
-        st.subheader("📍 Map of Company Sites")
+        st.subheader("📍 Map of Sites")
         st_folium(m, width=1000, height=600)
 
 
