@@ -2,73 +2,55 @@ import streamlit as st
 import requests
 import folium
 import time
-from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
-
-# Install pycountry if not already installed
-try:
-    import pycountry
-except ImportError:
-    import subprocess
-    subprocess.run(["pip", "install", "pycountry"])
-    import pycountry
+from folium.plugins import MarkerCluster
 
 API_KEY = "AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No"  # Replace with your key
 
-# Dynamically fetch list of all countries
-ALL_COUNTRIES = [country.name for country in pycountry.countries]
-
 def search_company_sites(company_name, location=""):
     """Search company locations using Google Places API."""
-    all_results = []
+    query = company_name if location.strip() == "" else f"{company_name} in {location}"
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    params = {'query': query, 'key': API_KEY}
 
-    search_targets = [location.strip()] if location.strip() else ALL_COUNTRIES
+    results = []
+    while url:
+        res = requests.get(url, params=params)
+        data = res.json()
+        st.write("Raw API Response:", data)  # optional debug
 
-    for loc in search_targets:
-        query = f"{company_name} in {loc}"
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-        params = {'query': query, 'key': API_KEY}
+        for place in data.get("results", []):
+            loc = place.get("geometry", {}).get("location")
+            if loc:
+                site = {
+                    "name": place.get("name"),
+                    "address": place.get("formatted_address"),
+                    "location": loc,
+                    "types": place.get("types"),
+                    "business_status": place.get("business_status")
+                }
+                results.append(site)
 
-        while url:
-            res = requests.get(url, params=params)
-            data = res.json()
+        next_page_token = data.get("next_page_token")
+        if next_page_token:
+            time.sleep(2)
+            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {'pagetoken': next_page_token, 'key': API_KEY}
+        else:
+            break
 
-            for place in data.get("results", []):
-                loc_data = place.get("geometry", {}).get("location")
-                if loc_data:
-                    site = {
-                        "name": place.get("name"),
-                        "address": place.get("formatted_address"),
-                        "location": loc_data,
-                        "types": place.get("types"),
-                        "business_status": place.get("business_status")
-                    }
-                    all_results.append(site)
-
-            next_page_token = data.get("next_page_token")
-            if next_page_token:
-                time.sleep(2)
-                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-                params = {'pagetoken': next_page_token, 'key': API_KEY}
-            else:
-                break
-
-        time.sleep(1.5)  # avoid hitting rate limits
-
-    # Deduplicate by name + address
-    unique_results = {(s['name'], s['address']): s for s in all_results}
-    return list(unique_results.values())
+    return results
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Global Company Site Finder", layout="wide")
-st.title("🌍 Company Site Finder (Worldwide via Google Maps API)")
+st.set_page_config(page_title="Company Site Finder", layout="wide")
+st.title("🌍 Company Site Finder (via Google Maps API)")
 
 company = st.text_input("Enter company name:", "Coca-Cola")
 location = st.text_input("Optional location (e.g., France):", "")
 
 if st.button("🔍 Search"):
     if company.strip():
-        with st.spinner("Searching... (this may take a few minutes globally)"):
+        with st.spinner("Searching..."):
             try:
                 sites = search_company_sites(company, location)
                 st.session_state["sites"] = sites
@@ -91,7 +73,7 @@ if "sites" in st.session_state:
         else:
             start_coords = [48.8566, 2.3522]  # fallback to Paris
 
-        m = folium.Map(location=start_coords, zoom_start=2)
+        m = folium.Map(location=start_coords, zoom_start=5)
         marker_cluster = MarkerCluster().add_to(m)
 
         for site in sites:
