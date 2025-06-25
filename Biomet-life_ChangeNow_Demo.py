@@ -70,7 +70,7 @@ if "results" in st.session_state:
                 popup=f"{site['name']}<br>{site['address']}<br>Status: {site['business_status']}"
             ).add_to(cluster)
 
-        st_folium(m, width=1000, height=600)
+        st_folium(m, width=5000, height=3000)
 
 
 
