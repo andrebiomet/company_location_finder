@@ -9,6 +9,7 @@ import pycountry
 # === API Key ===
 API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'  # Your Google API Key
 
+
 # === Get Subsidiaries from Wikidata ===
 def get_subsidiaries_from_wikidata(company_name):
     url = "https://www.wikidata.org/w/api.php"
@@ -18,21 +19,29 @@ def get_subsidiaries_from_wikidata(company_name):
         "format": "json",
         "search": company_name
     }
-    search = requests.get(url, params=params).json()
-    if not search["search"]:
+    search_response = requests.get(url, params=params).json()
+
+    if not search_response["search"]:
         return []
 
-    entity_id = next((r["id"] for r in search["search"] if "company" in r.get("description", "").lower()), search["search"][0]["id"])
+    # Always take the top entity
+    entity_id = search_response["search"][0]["id"]
+
+    # Query subsidiaries
+    sparql_url = "https://query.wikidata.org/sparql"
     query = f"""
     SELECT ?subsidiaryLabel WHERE {{
       wd:{entity_id} wdt:P355 ?subsidiary .
       SERVICE wikibase:label {{ bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }}
     }}
     """
-    sparql = "https://query.wikidata.org/sparql"
     headers = {"Accept": "application/sparql-results+json"}
-    data = requests.get(sparql, params={"query": query}, headers=headers).json()
-    return [r["subsidiaryLabel"]["value"] for r in data["results"]["bindings"]]
+    r = requests.get(sparql_url, params={"query": query}, headers=headers)
+    data = r.json()
+
+    subsidiaries = [result["subsidiaryLabel"]["value"] for result in data["results"]["bindings"]]
+    return subsidiaries
+
 
 # === Google Maps Places API ===
 def search_company_sites_google(company_name, location):
