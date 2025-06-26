@@ -8,34 +8,6 @@ from folium.plugins import MarkerCluster
 # === API Key ===
 API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'  # Your Google API Key
 
-def get_operating_countries_wikidata(company_name):
-    # Step 1: Search company
-    search_url = "https://www.wikidata.org/w/api.php"
-    search_params = {
-        "action": "wbsearchentities",
-        "language": "en",
-        "format": "json",
-        "search": company_name
-    }
-    res = requests.get(search_url, params=search_params).json()
-    if not res["search"]:
-        return []
-
-    # Pick best-matching entity
-    entity_id = next((r["id"] for r in res["search"] if "company" in r.get("description", "").lower()), res["search"][0]["id"])
-
-    # Step 2: Get operating countries (P2541)
-    sparql_url = "https://query.wikidata.org/sparql"
-    query = f"""
-    SELECT ?countryLabel WHERE {{
-      wd:{entity_id} wdt:P2541 ?country .
-      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-    }}
-    """
-    headers = {"Accept": "application/sparql-results+json"}
-    r = requests.get(sparql_url, params={"query": query}, headers=headers).json()
-    return [result["countryLabel"]["value"] for result in r["results"]["bindings"]]
-
 # === Get Subsidiaries from Wikidata ===
 def get_subsidiaries_from_wikidata(company_name):
     url = "https://www.wikidata.org/w/api.php"
@@ -163,19 +135,9 @@ with col3:
             if location.strip():
                 sites = search_company_sites_google(company, location)
             else:
-                # Get countries from Wikidata
-                countries = get_operating_countries_wikidata(company)
-                all_sites = []
-                if countries:
-                    for country in countries:
-                        st.info(f"Searching: {company} in {country}")
-                        country_sites = search_company_sites_google(company, country)
-                        all_sites.extend(country_sites)
-                    st.session_state.results = all_sites
-                    st.success(f"Found {len(all_sites)} location(s) in {len(countries)} countries.")
-                else:
-                    st.warning("No operating countries found in Wikidata. Using OSM fallback.")
-                    st.session_state.results = search_company_sites_osm(company)
+                sites = search_company_sites_osm(company)
+            st.session_state.results = sites
+            st.success(f"Found {len(sites)} location(s).")
 
 
 
