@@ -7,7 +7,7 @@ from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
 # === API Key ===
-API_KEY = 'YOUR_GOOGLE_API_KEY'  # Replace with your actual key
+API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'  # Replace with your actual key
 
 # === Utility Functions ===
 def get_all_countries():
