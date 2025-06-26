@@ -1,27 +1,14 @@
 import streamlit as st
 import requests
 import time
-import pycountry
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
-API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'
+# === API Key ===
+API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'  # Your Google API Key
 
-def get_all_countries():
-    return [country.name for country in pycountry.countries]
-
-def is_affiliated(name, company):
-    name_lower = name.lower()
-    company_lower = company.lower().strip()
-    if len(company_lower.split()) == 1 and len(company_lower) < 8:
-        return False
-    suffixes = ['s.a.', 'sa', 'inc', 'ltd', 'corp', 'plc', 'llc']
-    for s in suffixes:
-        company_lower = company_lower.replace(s, '')
-    company_lower = company_lower.strip()
-    return company_lower in name_lower
-
+# === Get Subsidiaries from Wikidata ===
 def get_subsidiaries_from_wikidata(company_name):
     url = "https://www.wikidata.org/w/api.php"
     params = {
@@ -30,68 +17,94 @@ def get_subsidiaries_from_wikidata(company_name):
         "format": "json",
         "search": company_name
     }
-    res = requests.get(url, params=params).json()
-    if not res["search"]:
+    search = requests.get(url, params=params).json()
+    if not search["search"]:
         return []
-    entity_id = next((r["id"] for r in res["search"] if "company" in r.get("description", "").lower()), res["search"][0]["id"])
+
+    entity_id = next((r["id"] for r in search["search"] if "company" in r.get("description", "").lower()), search["search"][0]["id"])
     query = f"""
     SELECT ?subsidiaryLabel WHERE {{
       wd:{entity_id} wdt:P355 ?subsidiary .
-      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }}
     }}
     """
+    sparql = "https://query.wikidata.org/sparql"
     headers = {"Accept": "application/sparql-results+json"}
-    data = requests.get("https://query.wikidata.org/sparql", params={"query": query}, headers=headers).json()
+    data = requests.get(sparql, params={"query": query}, headers=headers).json()
     return [r["subsidiaryLabel"]["value"] for r in data["results"]["bindings"]]
 
-def search_company_sites(company_name, location=""):
-    locations_to_search = [location] if location.strip() else get_all_countries()
+# === Google Maps Places API ===
+def search_company_sites_google(company_name, location="Greece"):
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    params = {'query': company_name + " in " + location, 'key': API_KEY}
     results = []
-    seen_place_ids = set()
-    for loc in locations_to_search:
-        query = f"{company_name} in {loc}"
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-        params = {'query': query, 'key': API_KEY}
-        while url:
-            res = requests.get(url, params=params)
-            data = res.json()
-            for place in data.get("results", []):
-                place_id = place.get("place_id")
-                name = place.get("name", "")
-                types = place.get("types", [])
-                if (place_id and place_id not in seen_place_ids
-                    and is_affiliated(name, company_name)
-                    and any(t in types for t in ['establishment', 'point_of_interest', 'store', 'gas_station', 'office', 'industrial'])):
-                    seen_place_ids.add(place_id)
-                    results.append({
-                        "company": company_name,
-                        "name": name,
-                        "address": place.get("formatted_address"),
-                        "location": place.get("geometry", {}).get("location"),
-                        "types": types,
-                        "status": place.get("business_status", "UNKNOWN"),
-                        "source": "Google"
-                    })
-            next_page_token = data.get("next_page_token")
-            if next_page_token:
-                time.sleep(2)
-                params = {'pagetoken': next_page_token, 'key': API_KEY}
-            else:
-                break
+
+    while url:
+        r = requests.get(url, params=params)
+        data = r.json()
+
+        for place in data.get("results", []):
+            results.append({
+                "name": place.get("name"),
+                "address": place.get("formatted_address"),
+                "location": place.get("geometry", {}).get("location"),
+                "source": "Google",
+                "types": place.get("types"),
+                "status": place.get("business_status", "UNKNOWN")
+            })
+
+        if "next_page_token" in data:
+            time.sleep(2)
+            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {'pagetoken': data["next_page_token"], 'key': API_KEY}
+        else:
+            break
+
+    return results
+
+# === OSM Overpass API ===
+def search_company_sites_osm(company_name):
+    query = f"""
+    [out:json][timeout:100];
+    (
+      nwr["name"="{company_name}"]["building"];
+      nwr["name"="{company_name}"]["office"];
+      nwr["name"="{company_name}"]["industrial"];
+    );
+    out center;""" 
+    response = requests.post("https://overpass-api.de/api/interpreter", data=query)
+    data = response.json()
+
+    results = []
+    for el in data["elements"]:
+        lat = el.get("lat") if el["type"] == "node" else el.get("center", {}).get("lat")
+        lon = el.get("lon") if el["type"] == "node" else el.get("center", {}).get("lon")
+
+        results.append({
+            "name": el.get("tags", {}).get("name", "Unnamed"),
+            "location": {"lat": lat, "lng": lon},
+            "source": "OSM",
+            "address": "OpenStreetMap object",
+            "types": [el.get("tags", {}).get("building") or el.get("tags", {}).get("office") or el.get("tags", {}).get("industrial")],
+            "status": "N/A"
+        })
+
     return results
 
 # === Streamlit UI ===
 st.set_page_config(page_title="Company Locator", layout="wide")
 st.title("🏢 Company Subsidiaries & Site Locator")
 
-company = st.text_input("Enter Company Name", "Amazon")
-location = st.text_input("Optional Location Filter (leave blank for global search)", "")
+company = st.text_input("Enter Company Name", "Coca Cola HBC")
+location = st.text_input("Optional Location Filter (uses Google API if specified)", "Greece")
 
 if "subsidiaries" not in st.session_state:
     st.session_state.subsidiaries = []
 if "results" not in st.session_state:
     st.session_state.results = []
 
+# 🔘 Button 1
+# 🔘 Buttons: Subsidiaries, Full Search, Company Only
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -107,27 +120,37 @@ with col2:
             names = [company] + st.session_state.subsidiaries
             all_sites = []
             for name in names:
-                st.info(f"Searching: {name}")
-                all_sites.extend(search_company_sites(name, location))
+                st.info(f"Searching: {name} using {'Google Maps' if location.strip() else 'OpenStreetMap'}")
+                if location.strip():
+                    sites = search_company_sites_google(name, location)
+                else:
+                    sites = search_company_sites_osm(name)
+                all_sites.extend(sites)
             st.session_state.results = all_sites
             st.success(f"Found {len(all_sites)} locations.")
 
 with col3:
     if st.button("🔍 Locate Company Only (No Subsidiaries)"):
         with st.spinner("Searching..."):
-            st.session_state.results = search_company_sites(company, location)
-            st.success(f"Found {len(st.session_state.results)} location(s).")
+            if location.strip():
+                sites = search_company_sites_google(company, location)
+            else:
+                sites = search_company_sites_osm(company)
+            st.session_state.results = sites
+            st.success(f"Found {len(sites)} location(s).")
+
+
 
 # === Map Results ===
 if st.session_state.results:
     st.markdown("### 📍 Locations Map")
     first = st.session_state.results[0]
-    m = folium.Map(location=[first["location"]["lat"], first["location"]["lng"]], zoom_start=4)
+    m = folium.Map(location=[first["location"]["lat"], first["location"]["lng"]], zoom_start=5)
     cluster = MarkerCluster().add_to(m)
 
     for site in st.session_state.results:
         loc = site["location"]
-        popup = f"<b>{site['company']}</b><br>{site['name']}<br>{site['address']}<br>Status: {site['status']}"
+        popup = f"<b>{site['name']}</b><br>{site['address']}<br><i>Source: {site['source']}</i><br>Status: {site['status']}"
         folium.Marker([loc["lat"], loc["lng"]], tooltip=site["name"], popup=popup).add_to(cluster)
 
     st_folium(m, width=3000, height=600)
