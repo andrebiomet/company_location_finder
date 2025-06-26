@@ -145,7 +145,7 @@ with col2:
                 if location.strip():
                     sites = search_company_sites_google(name, location)
                 else:
-                    sites = search_company_sites_osm(name)
+                    sites = search_company_sites_global_google(company_name)
                 all_sites.extend(sites)
             st.session_state.results = all_sites
             st.success(f"Found {len(all_sites)} locations.")
@@ -156,7 +156,7 @@ with col3:
             if location.strip():
                 sites = search_company_sites_google(company, location)
             else:
-                sites = search_company_sites_osm(company)
+                sites = search_company_sites_global_google(company_name)
             st.session_state.results = sites
             st.success(f"Found {len(sites)} location(s).")
 
