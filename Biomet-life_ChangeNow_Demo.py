@@ -5,7 +5,6 @@ import pycountry
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # === API Key ===
 API_KEY = 'YOUR_GOOGLE_API_KEY'  # Replace with your actual key
@@ -34,6 +33,7 @@ def get_subsidiaries_from_wikidata(company_name):
         "search": company_name
     }
     search_response = requests.get(search_url, params=search_params).json()
+    
     if not search_response["search"]:
         return []
 
@@ -49,12 +49,13 @@ def get_subsidiaries_from_wikidata(company_name):
     query = f"""
     SELECT ?subsidiaryLabel WHERE {{
       wd:{entity_id} wdt:P355 ?subsidiary .
-      SERVICE wikibase:label {{ bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],en\". }}
+      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }}
     }}
     """
     headers = {"Accept": "application/sparql-results+json"}
     r = requests.get(sparql_url, params={"query": query}, headers=headers)
     data = r.json()
+
     subsidiaries = [result["subsidiaryLabel"]["value"] for result in data["results"]["bindings"]]
     return subsidiaries
 
@@ -104,23 +105,6 @@ def search_company_sites(company_name, location=""):
 
     return results
 
-def fetch_sites_threaded(company_list, location):
-    results = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_name = {
-            executor.submit(search_company_sites, name, location): name
-            for name in company_list
-        }
-        for future in as_completed(future_to_name):
-            name = future_to_name[future]
-            try:
-                sites = future.result()
-                results.extend(sites)
-                st.success(f"✅ {name}: {len(sites)} sites found")
-            except Exception as e:
-                st.warning(f"⚠️ {name} failed: {e}")
-    return results
-
 # === Streamlit UI ===
 st.set_page_config(page_title="Company Sites & Subsidiaries", layout="wide")
 st.title("🏢 Company Subsidiaries & Site Locator")
@@ -133,8 +117,8 @@ if "subsidiaries" not in st.session_state:
 if "results" not in st.session_state:
     st.session_state.results = []
 
+# 🔘 Button 1: Get Subsidiaries
 col1, col2 = st.columns(2)
-
 with col1:
     if st.button("🔎 Get Subsidiaries"):
         with st.spinner("Querying Wikidata..."):
@@ -142,31 +126,29 @@ with col1:
             st.success(f"Found {len(st.session_state.subsidiaries)} subsidiaries.")
             st.write(st.session_state.subsidiaries)
 
+# 🔘 Button 2: Get All Sites
 with col2:
     if st.button("🌍 Get Company + Subsidiary Sites"):
-        with st.spinner("Searching Google Places in parallel..."):
+        with st.spinner("Searching Google Places..."):
             all_names = [company] + st.session_state.subsidiaries
-            all_sites = fetch_sites_threaded(all_names, location)
+            all_sites = []
+            for name in all_names:
+                st.info(f"Searching: {name}")
+                sites = search_company_sites(name, location)
+                all_sites.extend(sites)
             st.session_state.results = all_sites
-            st.success(f"✅ Total locations found: {len(all_sites)}")
+            st.success(f"Found {len(all_sites)} site(s).")
 
+# 🌐 Display Results on Map
 if st.session_state.results:
     st.markdown("### 📍 Mapped Locations")
     first_loc = st.session_state.results[0]["location"]
     m = folium.Map(location=[first_loc["lat"], first_loc["lng"]], zoom_start=5)
     cluster = MarkerCluster().add_to(m)
+
     for site in st.session_state.results:
         loc = site["location"]
         popup = f"<b>{site['company']}</b><br>{site['name']}<br>{site['address']}<br>Status: {site['business_status']}"
         folium.Marker(location=[loc["lat"], loc["lng"]], tooltip=site["name"], popup=popup).add_to(cluster)
+
     st_folium(m, width=3000, height=600)
-
-
-
-
-
-
-
-
-
-
