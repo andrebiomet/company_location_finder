@@ -11,3 +11,4 @@ python-docx
 branca
 matplotlib
 shap
+pycountry
