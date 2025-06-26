@@ -4,6 +4,25 @@ import time
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
+import pycountry
+
+def get_all_countries():
+    return [country.name for country in pycountry.countries]
+
+def is_affiliated(name, company):
+    name_lower = name.lower()
+    company_lower = company.lower().strip()
+
+    # Ignore short, generic names
+    if len(company_lower.split()) == 1 and len(company_lower) < 8:
+        return False
+
+    suffixes = ['s.a.', 'sa', 'inc', 'ltd', 'corp', 'plc', 'llc']
+    for s in suffixes:
+        company_lower = company_lower.replace(s, '')
+    company_lower = company_lower.strip()
+
+    return company_lower in name_lower
 
 # === API Key ===
 API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'  # Your Google API Key
@@ -62,34 +81,61 @@ def search_company_sites_google(company_name, location="Greece"):
 
     return results
 
-# === OSM Overpass API ===
+# === No location entered API ===
 def search_company_sites_osm(company_name):
-    query = f"""
-    [out:json][timeout:100];
-    (
-      nwr["name"="{company_name}"]["building"];
-      nwr["name"="{company_name}"]["office"];
-      nwr["name"="{company_name}"]["industrial"];
-    );
-    out center;""" 
-    response = requests.post("https://overpass-api.de/api/interpreter", data=query)
-    data = response.json()
-
+    """Fallback when no location is provided — search globally via Google across all countries."""
+    locations_to_search = get_all_countries()
     results = []
-    for el in data["elements"]:
-        lat = el.get("lat") if el["type"] == "node" else el.get("center", {}).get("lat")
-        lon = el.get("lon") if el["type"] == "node" else el.get("center", {}).get("lon")
+    seen_place_ids = set()
 
-        results.append({
-            "name": el.get("tags", {}).get("name", "Unnamed"),
-            "location": {"lat": lat, "lng": lon},
-            "source": "OSM",
-            "address": "OpenStreetMap object",
-            "types": [el.get("tags", {}).get("building") or el.get("tags", {}).get("office") or el.get("tags", {}).get("industrial")],
-            "status": "N/A"
-        })
+    for loc in locations_to_search:
+        query = f"{company_name} in {loc}"
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        params = {
+            'query': query,
+            'key': API_KEY
+        }
+
+        while url:
+            try:
+                res = requests.get(url, params=params)
+                data = res.json()
+            except Exception as e:
+                print(f"Error searching in {loc}: {e}")
+                break
+
+            for place in data.get("results", []):
+                place_id = place.get("place_id")
+                name = place.get("name", "")
+                types = place.get("types", [])
+
+                if (
+                    place_id
+                    and place_id not in seen_place_ids
+                    and is_affiliated(name, company_name)
+                    and any(t in types for t in ['establishment', 'point_of_interest', 'store', 'gas_station', 'office', 'industrial'])
+                ):
+                    seen_place_ids.add(place_id)
+                    site = {
+                        "name": name,
+                        "address": place.get("formatted_address"),
+                        "location": place.get("geometry", {}).get("location"),
+                        "source": "Google (Global)",
+                        "types": types,
+                        "status": place.get("business_status", "UNKNOWN")
+                    }
+                    results.append(site)
+
+            next_page_token = data.get("next_page_token")
+            if next_page_token:
+                time.sleep(2)
+                params = {'pagetoken': next_page_token, 'key': API_KEY}
+                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            else:
+                break
 
     return results
+
 
 # === Streamlit UI ===
 st.set_page_config(page_title="Company Locator", layout="wide")
