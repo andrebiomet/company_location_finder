@@ -1,76 +1,164 @@
 import streamlit as st
 import requests
 import time
+import pycountry
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
-API_KEY = 'AIzaSyCBhur5E-PvIFL6jSY3PoP6UR3Ns7Qb0No'
+# === Configuration ===
+API_KEY = 'YOUR_GOOGLE_API_KEY'  # Replace this with your actual API key
 
-def search_company_sites(company_name, location="Greece"):
-    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    params = {
-        'query': company_name + " in " + location,
-        'key': API_KEY
+# === Utility Functions ===
+def get_all_countries():
+    return [country.name for country in pycountry.countries]
+
+def is_affiliated(name, company):
+    name_lower = name.lower()
+    company_lower = company.lower().strip()
+    if len(company_lower.split()) == 1 and len(company_lower) < 8:
+        return False
+    suffixes = ['s.a.', 'sa', 'inc', 'ltd', 'corp', 'plc', 'llc']
+    for s in suffixes:
+        company_lower = company_lower.replace(s, '')
+    company_lower = company_lower.strip()
+    return company_lower in name_lower
+
+def get_subsidiaries_from_wikidata(company_name):
+    search_url = "https://www.wikidata.org/w/api.php"
+    search_params = {
+        "action": "wbsearchentities",
+        "language": "en",
+        "format": "json",
+        "search": company_name
     }
+    search_response = requests.get(search_url, params=search_params).json()
+    
+    if not search_response["search"]:
+        return []
 
-    results = []
-    while True:
-        res = requests.get(url, params=params)
-        data = res.json()
-
-        for place in data.get("results", []):
-            site = {
-                "name": place.get("name"),
-                "address": place.get("formatted_address"),
-                "location": place.get("geometry", {}).get("location"),
-                "types": place.get("types"),
-                "business_status": place.get("business_status")
-            }
-            results.append(site)
-
-        next_page_token = data.get("next_page_token")
-        if not next_page_token:
+    entity_id = None
+    for result in search_response["search"]:
+        if "company" in result.get("description", "").lower():
+            entity_id = result["id"]
             break
+    if not entity_id:
+        entity_id = search_response["search"][0]["id"]
 
-        time.sleep(2)
-        params = {
-            'pagetoken': next_page_token,
-            'key': API_KEY
-        }
+    sparql_url = "https://query.wikidata.org/sparql"
+    query = f"""
+    SELECT ?subsidiaryLabel WHERE {{
+      wd:{entity_id} wdt:P355 ?subsidiary .
+      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }}
+    }}
+    """
+    headers = {"Accept": "application/sparql-results+json"}
+    r = requests.get(sparql_url, params={"query": query}, headers=headers)
+    data = r.json()
+
+    subsidiaries = [result["subsidiaryLabel"]["value"] for result in data["results"]["bindings"]]
+    return subsidiaries
+
+def search_company_sites(company_name, location=""):
+    locations_to_search = [location] if location.strip() else get_all_countries()
+    results = []
+    seen_place_ids = set()
+
+    for loc in locations_to_search:
+        query = f"{company_name} in {loc}"
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        params = {'query': query, 'key': API_KEY}
+
+        while url:
+            res = requests.get(url, params=params)
+            data = res.json()
+
+            for place in data.get("results", []):
+                place_id = place.get("place_id")
+                name = place.get("name", "")
+                types = place.get("types", [])
+
+                if (
+                    place_id
+                    and place_id not in seen_place_ids
+                    and is_affiliated(name, company_name)
+                    and any(t in types for t in ['establishment', 'point_of_interest', 'store', 'gas_station', 'office', 'industrial'])
+                ):
+                    seen_place_ids.add(place_id)
+                    site = {
+                        "company": company_name,
+                        "name": name,
+                        "address": place.get("formatted_address"),
+                        "location": place.get("geometry", {}).get("location"),
+                        "types": types,
+                        "business_status": place.get("business_status")
+                    }
+                    results.append(site)
+
+            next_page_token = data.get("next_page_token")
+            if next_page_token:
+                time.sleep(2)
+                params = {'pagetoken': next_page_token, 'key': API_KEY}
+                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            else:
+                break
 
     return results
 
-# Streamlit UI
-st.set_page_config(page_title="Company Sites", layout="wide")
-st.title("📍 Google Maps Company Site Finder")
+def get_all_company_locations(company_name, location=""):
+    subsidiaries = get_subsidiaries_from_wikidata(company_name)
+    all_names = [company_name] + subsidiaries
+    all_sites = []
 
-company = st.text_input("Company Name", "Coca Cola")
-location = st.text_input("Location", "Greece")
+    for name in all_names:
+        st.info(f"Searching locations for: {name}")
+        sites = search_company_sites(name, location)
+        all_sites.extend(sites)
 
-if st.button("🔍 Search"):
-    with st.spinner("Fetching data..."):
-        results = search_company_sites(company, location)
-        st.session_state["results"] = results
+    return all_sites, subsidiaries
 
-if "results" in st.session_state:
-    results = st.session_state["results"]
-    st.success(f"Found {len(results)} site(s).")
+# === Streamlit UI ===
+st.set_page_config(page_title="Company Sites & Subsidiaries", layout="wide")
+st.title("🏢 Company Subsidiaries & Site Locator")
 
-    if results:
-        first_loc = results[0]["location"]
-        m = folium.Map(location=[first_loc["lat"], first_loc["lng"]], zoom_start=6)
-        cluster = MarkerCluster().add_to(m)
+company = st.text_input("Enter Company Name", "Motor Oil Hellas")
+location = st.text_input("Limit Search to Country (optional)", "Greece")
 
-        for site in results:
-            loc = site["location"]
-            folium.Marker(
-                location=[loc["lat"], loc["lng"]],
-                tooltip=site["name"],
-                popup=f"{site['name']}<br>{site['address']}<br>Status: {site['business_status']}"
-            ).add_to(cluster)
+# Session state to avoid re-searching on every change
+if "subsidiaries" not in st.session_state:
+    st.session_state.subsidiaries = []
+if "results" not in st.session_state:
+    st.session_state.results = []
 
-        st_folium(m, width=5000, height=3000)
+# Button: Get Subsidiaries Only
+if st.button("🔍 Get Subsidiaries"):
+    with st.spinner("Querying Wikidata..."):
+        st.session_state.subsidiaries = get_subsidiaries_from_wikidata(company)
+        st.success(f"Found {len(st.session_state.subsidiaries)} subsidiaries.")
+        st.write(st.session_state.subsidiaries)
+
+# Button: Get All Sites (Company + Subsidiaries)
+if st.button("🌍 Find All Company Sites"):
+    with st.spinner("Searching Google Places..."):
+        all_sites, subsidiaries = get_all_company_locations(company, location)
+        st.session_state.results = all_sites
+        st.session_state.subsidiaries = subsidiaries
+        st.success(f"Found {len(all_sites)} site(s).")
+
+# Map Visualization
+if st.session_state.results:
+    st.markdown("### 📍 Mapped Company Sites")
+    first_loc = st.session_state.results[0]["location"]
+    m = folium.Map(location=[first_loc["lat"], first_loc["lng"]], zoom_start=5)
+    cluster = MarkerCluster().add_to(m)
+
+    for site in st.session_state.results:
+        loc = site["location"]
+        popup = f"<b>{site['company']}</b><br>{site['name']}<br>{site['address']}<br>Status: {site['business_status']}"
+        folium.Marker(location=[loc["lat"], loc["lng"]], tooltip=site["name"], popup=popup).add_to(cluster)
+
+    st_folium(m, width=1200, height=700)
+
 
 
 
