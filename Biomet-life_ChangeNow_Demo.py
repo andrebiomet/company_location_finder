@@ -35,7 +35,7 @@ def get_subsidiaries_from_wikidata(company_name):
     return [r["subsidiaryLabel"]["value"] for r in data["results"]["bindings"]]
 
 # === Google Maps Places API ===
-def search_company_sites_google(company_name, location="Greece"):
+def search_company_sites_google(company_name, location):
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     params = {'query': company_name + " in " + location, 'key': API_KEY}
     results = []
@@ -64,31 +64,51 @@ def search_company_sites_google(company_name, location="Greece"):
     return results
 
 # === OSM Overpass API ===
-def search_company_sites_osm(company_name):
-    query = f"""
-    [out:json][timeout:100];
-    (
-      nwr["name"="{company_name}"]["building"];
-      nwr["name"="{company_name}"]["office"];
-      nwr["name"="{company_name}"]["industrial"];
-    );
-    out center;""" 
-    response = requests.post("https://overpass-api.de/api/interpreter", data=query)
-    data = response.json()
+def search_company_sites_global_google(company_name):
+    """Global fallback when no location is provided — search across key countries using Google Places API."""
+    global_regions = [
+        "United States", "Canada", "Mexico", "Brazil", "Argentina",
+        "United Kingdom", "France", "Germany", "Italy", "Spain", "Netherlands", "Russia",
+        "South Africa", "Nigeria", "Egypt", "India", "China", "Japan", "South Korea",
+        "Australia", "New Zealand", "Indonesia", "Saudi Arabia", "Turkey", "Greece"
+    ]
 
     results = []
-    for el in data["elements"]:
-        lat = el.get("lat") if el["type"] == "node" else el.get("center", {}).get("lat")
-        lon = el.get("lon") if el["type"] == "node" else el.get("center", {}).get("lon")
+    seen_places = set()
 
-        results.append({
-            "name": el.get("tags", {}).get("name", "Unnamed"),
-            "location": {"lat": lat, "lng": lon},
-            "source": "OSM",
-            "address": "OpenStreetMap object",
-            "types": [el.get("tags", {}).get("building") or el.get("tags", {}).get("office") or el.get("tags", {}).get("industrial")],
-            "status": "N/A"
-        })
+    for loc in global_regions:
+        query = f"{company_name} in {loc}"
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        params = {
+            'query': query,
+            'key': API_KEY
+        }
+
+        while url:
+            res = requests.get(url, params=params)
+            data = res.json()
+
+            for place in data.get("results", []):
+                place_id = place.get("place_id")
+                if place_id and place_id not in seen_places:
+                    seen_places.add(place_id)
+                    site = {
+                        "name": place.get("name"),
+                        "address": place.get("formatted_address"),
+                        "location": place.get("geometry", {}).get("location"),
+                        "source": "Google (Global)",
+                        "types": place.get("types"),
+                        "status": place.get("business_status", "UNKNOWN")
+                    }
+                    results.append(site)
+
+            next_page_token = data.get("next_page_token")
+            if next_page_token:
+                time.sleep(2)  # Required delay
+                params = {'pagetoken': next_page_token, 'key': API_KEY}
+                url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            else:
+                break
 
     return results
 
