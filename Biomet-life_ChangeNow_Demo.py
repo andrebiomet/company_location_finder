@@ -143,9 +143,9 @@ with col2:
             for name in names:
                 st.info(f"Searching: {name} using {'Google Maps' if location.strip() else 'OpenStreetMap'}")
                 if location.strip():
-                    sites = search_company_sites_google(name, location)
+                    sites = search_company_sites_google(company, location)
                 else:
-                    sites = search_company_sites_global_google(company_name)
+                    sites = search_company_sites_global_google(company)
                 all_sites.extend(sites)
             st.session_state.results = all_sites
             st.success(f"Found {len(all_sites)} locations.")
@@ -156,7 +156,7 @@ with col3:
             if location.strip():
                 sites = search_company_sites_google(company, location)
             else:
-                sites = search_company_sites_global_google(company_name)
+                sites = search_company_sites_global_google(company)
             st.session_state.results = sites
             st.success(f"Found {len(sites)} location(s).")
 
