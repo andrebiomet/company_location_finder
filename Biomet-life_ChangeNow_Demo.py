@@ -105,7 +105,9 @@ if "results" not in st.session_state:
     st.session_state.results = []
 
 # 🔘 Button 1
-col1, col2 = st.columns(2)
+# 🔘 Buttons: Subsidiaries, Full Search, Company Only
+col1, col2, col3 = st.columns(3)
+
 with col1:
     if st.button("🔎 Get Subsidiaries"):
         with st.spinner("Querying Wikidata..."):
@@ -113,7 +115,6 @@ with col1:
             st.success(f"Found {len(st.session_state.subsidiaries)} subsidiaries.")
             st.write(st.session_state.subsidiaries)
 
-# 🔘 Button 2
 with col2:
     if st.button("🌍 Locate Company + Subsidiaries"):
         with st.spinner("Searching..."):
@@ -126,9 +127,19 @@ with col2:
                 else:
                     sites = search_company_sites_osm(name)
                 all_sites.extend(sites)
-
             st.session_state.results = all_sites
             st.success(f"Found {len(all_sites)} locations.")
+
+with col3:
+    if st.button("🔍 Locate Company Only (No Subsidiaries)"):
+        with st.spinner("Searching..."):
+            if location.strip():
+                sites = search_company_sites_google(company, location)
+            else:
+                sites = search_company_sites_osm(company)
+            st.session_state.results = sites
+            st.success(f"Found {len(sites)} location(s).")
+
 
 # === Map Results ===
 if st.session_state.results:
